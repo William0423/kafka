@@ -195,7 +195,11 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         return
 
       val canStartup = isStartingUp.compareAndSet(false, true)
+
       if (canStartup) {
+        /**
+          * 状态更新：
+          */
         brokerState.newState(Starting)
 
         /* setup zookeeper */
@@ -215,6 +219,9 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         // applied after DynamicConfigManager starts.
         config.dynamicConfig.initialize(zkClient)
 
+        /**
+          * 处理延迟和周期性任务
+          */
         /* start scheduler */
         kafkaScheduler = new KafkaScheduler(config.backgroundThreads)
         kafkaScheduler.startup()
@@ -243,6 +250,10 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
         tokenCache = new DelegationTokenCache(ScramMechanism.mechanismNames)
         credentialProvider = new CredentialProvider(ScramMechanism.mechanismNames, tokenCache)
 
+
+        /**
+          * 启动请求处理的网络服务
+          */
         // Create and start the socket server acceptor threads so that the bound port is known.
         // Delay starting processors until the end of the initialization sequence to ensure
         // that credentials have been loaded before processing authentications.
@@ -295,6 +306,10 @@ class KafkaServer(val config: KafkaConfig, time: Time = Time.SYSTEM, threadNameP
           kafkaController, zkClient, config.brokerId, config, metadataCache, metrics, authorizer, quotaManagers,
           fetchManager, brokerTopicStats, clusterId, time, tokenManager)
 
+        /**
+          * KafkaRequestHandlerPool: 线程池, 每个线程里跑一个KafkaRequestHandler
+          * 负责接收和返回请求：
+          */
         requestHandlerPool = new KafkaRequestHandlerPool(config.brokerId, socketServer.requestChannel, apis, time,
           config.numIoThreads)
 

@@ -1023,6 +1023,11 @@ object KafkaConfig {
     fromProps(props, doLog)
   }
 
+  /**
+    * 作为Class KafkaConfig的伴生类,定义了创建KafkaConfig对象的工厂方法:
+    * @param props
+    * @return
+    */
   def apply(props: java.util.Map[_, _]): KafkaConfig = new KafkaConfig(props, true)
 
 }

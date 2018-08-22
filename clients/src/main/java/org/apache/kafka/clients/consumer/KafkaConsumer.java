@@ -1178,6 +1178,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     }
                 }
 
+                //note: 从订阅的 partition 中拉取数据,pollOnce() 才是对 Consumer 客户端拉取数据的核心实现
                 final Map<TopicPartition, List<ConsumerRecord<K, V>>> records = pollForFetches(timer);
                 if (!records.isEmpty()) {
                     // before returning the fetched records, we can send off the next round of fetches

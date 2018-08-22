@@ -23,13 +23,24 @@ import kafka.metrics.KafkaMetricsReporter
 import kafka.utils.{Exit, Logging, VerifiableProperties}
 
 object KafkaServerStartable {
+
+  /**
+    * 伴生对象: object KafkaServerStartable 提供fromProps方法来创建 KafkaServerStartable;
+    * KafkaServerStartable对象创建时会同时创建 KafkaServer, 这才是真正的主角;
+    *
+    * @param serverProps
+    * @return
+    */
   def fromProps(serverProps: Properties) = {
     val reporters = KafkaMetricsReporter.startReporters(new VerifiableProperties(serverProps))
+
     new KafkaServerStartable(KafkaConfig.fromProps(serverProps, false), reporters)
   }
+
 }
 
 class KafkaServerStartable(val staticServerConfig: KafkaConfig, reporters: Seq[KafkaMetricsReporter]) extends Logging {
+
   private val server = new KafkaServer(staticServerConfig, kafkaMetricsReporters = reporters)
 
   def this(serverConfig: KafkaConfig) = this(serverConfig, Seq.empty)
