@@ -360,6 +360,7 @@ class Partition(val topic: String,
    */
   private def maybeIncrementLeaderHW(leaderReplica: Replica, curTime: Long = time.milliseconds): Boolean = {
     val allLogEndOffsets = assignedReplicas.filter { replica =>
+      // 保留 副本LEO落后于leader LEO的时长不大于replica.lag.time.max.ms参数值(默认是10s) 的副本
       curTime - replica.lastCaughtUpTimeMs <= replicaManager.config.replicaLagTimeMaxMs || inSyncReplicas.contains(replica)
     }.map(_.logEndOffset)
     val newHighWatermark = allLogEndOffsets.min(new LogOffsetMetadata.OffsetOrdering)
@@ -394,7 +395,7 @@ class Partition(val topic: String,
             assert(newInSyncReplicas.nonEmpty)
             info("Shrinking ISR for partition [%s,%d] from %s to %s".format(topic, partitionId,
               inSyncReplicas.map(_.brokerId).mkString(","), newInSyncReplicas.map(_.brokerId).mkString(",")))
-            // update ISR in zk and in cache
+            // update ISR in zk and in cache：在此处更新zookeeper相关的信息
             updateIsr(newInSyncReplicas)
             // we may need to increment high watermark since ISR could be down to 1
 
