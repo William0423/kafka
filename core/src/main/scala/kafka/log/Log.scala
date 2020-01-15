@@ -109,6 +109,10 @@ class Log(@volatile var dir: File,
 
   @volatile private var nextOffsetMetadata: LogOffsetMetadata = _
 
+
+  /**
+    * 在Log中，将每个LogSegment的baseOffset作为key，LogSegment对象作为value，放入segments这个跳表中管理
+    */
   /* the actual segments of the log */
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
   locally {
@@ -351,12 +355,21 @@ class Log(@volatile var dir: File,
    * @return Information about the appended messages including the first and last offset.
    */
   def append(records: MemoryRecords, assignOffsets: Boolean = true): LogAppendInfo = {
+
+    /**
+      * 对ByteBufferMessageSet中的Message数据进行验证，并返回LogAppendInfo对象。
+      * 在LogAppendInfo中封装了ByteBufferMessageSet中第一个消息的offset、最后一个消息的offset、生产者采用的压缩方式、追加到Log的时间戳、服务端用的压缩方式、外层消息的个数、通过验证的总字节数等信息。
+      *
+      */
     val appendInfo = analyzeAndValidateRecords(records)
 
     // if we have any valid messages, append them to the log
     if (appendInfo.shallowCount == 0)
       return appendInfo
 
+    /**
+      * 清除未验证通过的Message。
+      */
     // trim any invalid bytes or partial messages before appending it to the on-disk log
     var validRecords = trimInvalidBytes(records, appendInfo)
 
@@ -369,6 +382,9 @@ class Log(@volatile var dir: File,
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
+          /**
+            * 进行内部压缩消息做进一步验证、消息格式转换、调整Magic值、修改时间戳等操作，并为Message分配offset。
+            */
           val validateAndOffsetAssignResult = try {
             LogValidator.validateMessagesAndAssignOffsets(validRecords,
                                                           offset,
@@ -389,6 +405,9 @@ class Log(@volatile var dir: File,
           if (config.messageTimestampType == TimestampType.LOG_APPEND_TIME)
             appendInfo.logAppendTime = now
 
+          /**
+            * 如果在validateMessagesAndAssignOffsets()方法中修改了ByteBufferMessageSet的长度，则重新验证Message的长度是否合法。
+            */
           // re-validate message sizes if there's a possibility that they have changed (due to re-compression or message
           // format conversion)
           if (validateAndOffsetAssignResult.messageSizeMaybeChanged) {
@@ -416,25 +435,33 @@ class Log(@volatile var dir: File,
             .format(validRecords.sizeInBytes, config.segmentSize))
         }
 
+        /**
+          * 调用Log.maybeRoll()方法获取activeSegment，此过程可能分配新的activeSegment。
+          */
         // maybe roll the log if this segment is full
         val segment = maybeRoll(messagesSize = validRecords.sizeInBytes,
           maxTimestampInMessages = appendInfo.maxTimestamp,
           maxOffsetInMessages = appendInfo.lastOffset)
 
 
+        // 日志追加操作分成了下面两步：
+        /** 将ByteBufferMessageSetSet中的消息追加到activeSegment中，通过调用LogSegment.append()方法的实现。 **/
         // now append to the log
         segment.append(firstOffset = appendInfo.firstOffset,
           largestOffset = appendInfo.lastOffset,
           largestTimestamp = appendInfo.maxTimestamp,
           shallowOffsetOfMaxTimestamp = appendInfo.offsetOfMaxTimestamp,
           records = validRecords)
-
+        /** 更新当前副本的LEO，也就是Log.nextOffsetMetadata字段。 **/
         // increment the log end offset
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
           .format(this.name, appendInfo.firstOffset, nextOffsetMetadata.messageOffset, validRecords))
 
+        /**
+          * 执行flush()操作，将LEO之前的全部Message刷新到磁盘。
+          */
         if (unflushedMessages >= config.flushInterval)
           flush()
 
@@ -548,6 +575,12 @@ class Log(@volatile var dir: File,
   def read(startOffset: Long, maxLength: Int, maxOffset: Option[Long] = None, minOneMessage: Boolean = false): FetchDataInfo = {
     trace("Reading %d bytes from offset %d in log %s of length %d bytes".format(maxLength, startOffset, name, size))
 
+    /**
+      * 在Log.append()方法中通过加锁进行同步控制，在read()方法中并没有加锁操作，
+      * 它在开始查询消息之前会将nextOffsetMetadata字段（@volatile修饰）保存成方法的局部变量，从而避免线程安全的问题。
+      * 在updateLogEndOffset()方法的代码会发现每次更新updateLogEndOffset的时候，都是创建新的LogOffsetMetadata对象，
+      * 而且LogOffsetMetadata中也没有提供任何修改属性的方法，可见LogOffsetMetadata对象是个不可变对象，这与第2章介绍的Cluster类一样。
+      */
     // Because we don't use lock for reading, the synchronization is a little bit tricky.
     // We create the local variables to avoid race conditions with updates to the log.
     val currentNextOffsetMetadata = nextOffsetMetadata
@@ -555,6 +588,10 @@ class Log(@volatile var dir: File,
     if(startOffset == next)
       return FetchDataInfo(currentNextOffsetMetadata, MemoryRecords.EMPTY)
 
+    /**
+      * JDK中的跳表类ConcurrentSkipListMap实现：
+      * 查找baseOffset小于startOffset且baseOffset最大的LogSegment,
+      */
     var entry = segments.floorEntry(startOffset)
 
     // attempt to read beyond the log end offset is an error
@@ -578,11 +615,15 @@ class Log(@volatile var dir: File,
             entry.getValue.size
           else
             exposedPos
-        } else {
+        } else { // 读取的是非activeS
           entry.getValue.size
         }
       }
       val fetchInfo = entry.getValue.read(startOffset, maxOffset, maxLength, maxPosition, minOneMessage)
+
+      /**
+        * 当前LogSegment中没有读取到数据，则继续读取下一个LogSegment
+        */
       if(fetchInfo == null) {
         entry = segments.higherEntry(entry.getKey)
       } else {
