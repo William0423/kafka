@@ -59,7 +59,8 @@ class LogManager(val logDirs: Array[File],
 
   private val logCreationOrDeletionLock = new Object
 
-  // Pool[TopicAndPartition, Log]类型，用于管理TopicAndPartition与Log之间的对应关系。使用的是Kafka自定义的Pool类型对象，底层使用JDK提供的线程安全的HashMap——ConcurrentHashMap实现。
+  // Pool[TopicAndPartition, Log]类型，用于管理TopicAndPartition与Log之间的对应关系。
+  // 使用的是Kafka自定义的Pool类型对象，底层使用JDK提供的线程安全的HashMap——ConcurrentHashMap实现。
   private val logs = new Pool[TopicPartition, Log]()
 
   private val logsToBeDeleted = new LinkedBlockingQueue[Log]()

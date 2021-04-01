@@ -180,7 +180,8 @@ object RequestChannel extends Logging {
 }
 
 /**
-  * 在RequestChannel中包含了一个requestQueue队列和多个responseQueues队列，每个Processor线程对应一个responseQueue。
+  * 在RequestChannel中包含了一个requestQueue队列和多个responseQueues队列，
+  * 每个Processor线程对应一个responseQueue。
   *
   */
 class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMetricsGroup {
@@ -190,7 +191,7 @@ class RequestChannel(val numProcessors: Int, val queueSize: Int) extends KafkaMe
   private val requestQueue = new ArrayBlockingQueue[RequestChannel.Request](queueSize)
 
   /**
-    *   队列数量
+    *   响应队列数量
     */
   private val responseQueues = new Array[BlockingQueue[RequestChannel.Response]](numProcessors)
 

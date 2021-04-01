@@ -78,7 +78,6 @@ class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time
     * ConnectionQuotas类型的对象。在ConnectionQuotas中，提供了控制每个IP上的最大连接数的功能。
     * 底层通过一个Map对象，记录每个IP地址上建立的连接数，创建新Connect时与maxConnectionsPerIpOverrides指定的最大值（或maxConnectionsPerIp）进行比较，
     * 若超出限制，则报错。因为有多个Acceptor线程并发访问底层的Map对象，则需要synchronized进行同步。
-    *
     */
   private var connectionQuotas: ConnectionQuotas = _
 
@@ -92,37 +91,30 @@ class SocketServer(val config: KafkaConfig, val metrics: Metrics, val time: Time
    * Start the socket server
    */
   def startup() {
-    this.synchronized {
-
+    this.synchronized { // 同步
       connectionQuotas = new ConnectionQuotas(maxConnectionsPerIp, maxConnectionsPerIpOverrides)
-
       val sendBufferSize = config.socketSendBufferBytes
       val recvBufferSize = config.socketReceiveBufferBytes
       val brokerId = config.brokerId
-
       var processorBeginIndex = 0
       config.listeners.foreach { endpoint =>
-
         /**
           * Endpoint集合。一般的服务器都有多块网卡，可以配置多个IP，Kafka可以同时监听多个端口。
           * Endpoint类中封装了需要监听的host、port及使用的网络协议。每个Endpoint都会创建一个对应的Acceptor对象。
-          *
           */
         val listenerName = endpoint.listenerName
         val securityProtocol = endpoint.securityProtocol
-
         val processorEndIndex = processorBeginIndex + numProcessorThreads
 
         /**
           * endpoint与Processor对象的集合
-          *
           */
         for (i <- processorBeginIndex until processorEndIndex)
           processors(i) = newProcessor(i, connectionQuotas, listenerName, securityProtocol)
 
         /**
           * 1、每个endpoint对应一个 Acceptor
-          * 2、Acceptor创建过程中启动了Processor线程：每个Acceptor线程对应多个Processor
+          * 2、Acceptor创建过程中启动了Processor线程：每个Acceptor线程对应多个Processor 【默认3个】
           */
         val acceptor = new Acceptor(endpoint, sendBufferSize, recvBufferSize, brokerId, processors.slice(processorBeginIndex, processorEndIndex), connectionQuotas)
         acceptors.put(endpoint, acceptor)
@@ -311,17 +303,15 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
   }
 
   /**
-   * Accept loop that checks for new connection attempts
-   *
    * Acceptor只负责接收新连接，并采用round-robin的方式交给各个Processor
    */
+  //  Accept loop that checks for new connection attempts
   def run() {
     /**
       * 将 Channel 注册到选择器中
       * SelectionKey.OP_ACCEPT表示channel的状态，有四种状态，
       */
     serverChannel.register(nioSelector, SelectionKey.OP_ACCEPT)
-
     startupComplete()
     try {
       var currentProcessor = 0
@@ -331,24 +321,21 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
             * 最多等待500毫秒的时间，看是否有socket过来
             */
           val ready = nioSelector.select(500)
-
           if (ready > 0) {
-
             val keys = nioSelector.selectedKeys()
             val iter = keys.iterator()
-
             while (iter.hasNext && isRunning) {
               try {
+                // key是NIO封装的连接。
                 val key = iter.next
                 iter.remove()
+                // a connection was accepted by a ServerSocketChannel.
                 if (key.isAcceptable)
-                /**
-                  * Acceptor接收配置socket并传给processor
-                  */
+                  // Acceptor接收配置socket并传给processor
                   accept(key, processors(currentProcessor))
-
                 else
                   throw new IllegalStateException("Unrecognized key state for acceptor thread.")
+                // 每次都重算processor下标
                 // round robin to the next processor thread
                 currentProcessor = (currentProcessor + 1) % processors.length
 
@@ -414,10 +401,8 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
    * Accept a new connection
    */
   def accept(key: SelectionKey, processor: Processor) {
-
     val serverSocketChannel = key.channel().asInstanceOf[ServerSocketChannel]
     val socketChannel = serverSocketChannel.accept()
-
     try {
       connectionQuotas.inc(socketChannel.socket().getInetAddress)
 
@@ -434,7 +419,8 @@ private[kafka] class Acceptor(val endPoint: EndPoint,
                   socketChannel.socket.getReceiveBufferSize, recvBufferSize))
 
       /**
-        * Acceptor传过来的新socket放在了一个ConcorrentLinkedQueue中
+        * Acceptor传过来的新socket轮询放到processor中
+        * 在processor中，是放在了一个ConcorrentLinkedQueue中
         */
       processor.accept(socketChannel)
 
@@ -736,12 +722,12 @@ private[kafka] class Processor(val id: Int,
    */
   def accept(socketChannel: SocketChannel) {
     newConnections.add(socketChannel)
+    //
     wakeup()
   }
 
   /**
    * Register any new connections that have been queued up
-   *
    * 处理newConnections队列中的新建SocketChannel。
    */
   private def configureNewConnections() {
